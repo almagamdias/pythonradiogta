@@ -3,6 +3,14 @@ name = "gta-radio"
 version = "0.1.0"
 description = "Cross-platform GTA Radio Simulator"
 requires-python = ">=3.12"
+dependencies = [
+    "miniaudio>=1.61",
+    "mutagen>=1.47",
+]
 
 [tool.pyright]
 typeCheckingMode = "basic"
+
+[tool.setuptools.packages.find]
+include = ["radio*"]  # Указывает собирать только папку radio
+exclude = ["assets*", "test_data*"]  # Игнорировать служебные папки

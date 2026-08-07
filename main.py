@@ -1,28 +1,27 @@
-from radio import RadioEngine
 from pathlib import Path
 
-from radio.util.filesystem import (
-    find_audio,
-    find_logo,
-    list_directories,
-)
+from radio.library.gen1 import Gen1Loader
 
 
 def main() -> None:
-    root = Path("test_data/GTA IV")
+    loader = Gen1Loader()
 
-    print("Directories:")
+    library = loader.load(
+        Path("test_data/GTA IV")
+    )
 
-    for station in list_directories(root):
-        print(f"\n{station.name}")
+    print(f"Stations: {len(library.stations)}")
+    print()
 
-        print(" Audio:")
-        for file in find_audio(station):
-            print(f"   {file.name}")
+    for station in library.stations:
+        song = station.songs[0]
 
-        print(" Logo:")
-        for file in find_logo(station):
-            print(f"   {file.name}")
+        print(station.name)
+        print(f"  Song     : {song.title}")
+        print(f"  Duration : {song.duration} ms")
+        print(f"  Logo     : {station.logo}")
+        print()
+
 
 if __name__ == "__main__":
     main()

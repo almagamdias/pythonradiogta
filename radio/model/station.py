@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,10 +6,8 @@ from radio.model.song import Song
 
 @dataclass(slots=True, frozen=True)
 class Station:
-    """
-    Immutable radio station description.
-    """
+    """Radio station."""
 
     name: str
-    logo: Path | None
-    song: Song
+    songs: tuple[Song, ...]
+    logo: Path | None = None

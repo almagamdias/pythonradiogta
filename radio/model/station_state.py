@@ -10,7 +10,7 @@ class StationState:
     Runtime state of a radio station.
     """
 
-    position_ms: int = 0
+    position_ms: Milliseconds = 0
 
     playing: bool = False
 

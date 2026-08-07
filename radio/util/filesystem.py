@@ -1,69 +1,63 @@
+"""
+Filesystem utilities.
+
+All filesystem operations used by the project are centralized here.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
+from radio.constants import LOGO_NAMES
 
-AUDIO_EXTENSIONS = frozenset({
+_AUDIO_EXTENSIONS = frozenset({
     ".ogg",
     ".mp3",
     ".wav",
     ".flac",
 })
 
-IMAGE_EXTENSIONS = frozenset({
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".bmp",
-    ".webp",
-})
 
-def find_files(
-    directory: Path,
-    extensions: frozenset[str],
-) -> list[Path]:
+def list_directories(root: Path) -> list[Path]:
     """
-    Return all files in directory with specified extensions.
+    Return sorted child directories.
     """
 
     return sorted(
         (
             path
-            for path in directory.iterdir()
-            if path.is_file() and path.suffix.lower() in extensions
-        ),
-        key=lambda path: path.name.casefold(),
-    )
-
-def is_audio_file(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS
-
-def is_image_file(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-
-def find_audio(directory: Path) -> list[Path]:
-    return find_files(directory, AUDIO_EXTENSIONS)
-
-def find_logo(directory: Path) -> list[Path]:
-    return find_files(directory, IMAGE_EXTENSIONS)
-
-def list_directories(directory: Path) -> list[Path]:
-    """
-    Return child directories sorted by name.
-    """
-
-    return sorted(
-        (
-            path
-            for path in directory.iterdir()
+            for path in root.iterdir()
             if path.is_dir()
         ),
         key=lambda path: path.name.casefold(),
     )
 
-def normalize_path(path: Path) -> Path:
+
+def find_audio_files(directory: Path) -> list[Path]:
     """
-    Return normalized absolute path.
+    Return sorted audio files in a directory.
     """
 
-    return path.expanduser().resolve()
+    return sorted(
+        (
+            path
+            for path in directory.iterdir()
+            if path.is_file()
+            and path.suffix.casefold() in _AUDIO_EXTENSIONS
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+
+
+def find_logo(directory: Path) -> Path | None:
+    """
+    Return station logo if it exists.
+    """
+
+    for logo_name in LOGO_NAMES:
+        logo = directory / logo_name
+
+        if logo.is_file():
+            return logo
+
+    return None

@@ -1,3 +1,13 @@
-LOGO_NAME = "logo"
+"""
+Project constants.
+"""
 
-STATION_GROUP_INFO = "stationGroupInfo.json"
+from __future__ import annotations
+
+LOGO_NAMES = (
+    "logo.png",
+    "logo.jpg",
+    "logo.jpeg",
+    "logo.webp",
+    "logo.bmp",
+)
