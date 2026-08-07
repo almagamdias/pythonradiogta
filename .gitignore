@@ -5,3 +5,6 @@ __pycache__/
 *.log
 .idea/
 .vscode/
+*.ogg
+*.wav
+*.mp3
