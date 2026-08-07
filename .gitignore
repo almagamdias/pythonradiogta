@@ -1,10 +1,16 @@
+# Virtual environment
 .venv/
+
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.log
+*.py[cod]
+
+# IDE
 .idea/
 .vscode/
-*.ogg
-*.wav
-*.mp3
+
+# Logs
+*.log
+
+# Test media
+test_data/
