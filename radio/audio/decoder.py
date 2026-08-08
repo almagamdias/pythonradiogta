@@ -11,8 +11,6 @@ from radio.constants import AUDIO_CHANNELS, AUDIO_SAMPLE_RATE
 
 AudioStream = Generator[array, int, None]
 
-DECODE_FRAMES = 4096
-
 
 class AudioDecoder:
     """Stream decoded audio from a file."""
@@ -27,5 +25,5 @@ class AudioDecoder:
             output_format=miniaudio.SampleFormat.SIGNED16,
             nchannels=AUDIO_CHANNELS,
             sample_rate=AUDIO_SAMPLE_RATE,
-            frames_to_read=DECODE_FRAMES,
+            frames_to_read=4096,
         )

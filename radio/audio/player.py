@@ -4,8 +4,6 @@ from array import array
 from collections.abc import Generator
 from pathlib import Path
 
-import miniaudio
-
 from radio.audio.decoder import AudioDecoder
 from radio.audio.device import MiniaudioDevice
 
@@ -17,20 +15,18 @@ class AudioPlayer:
     """Play one audio file continuously."""
 
     def __init__(self, path: Path) -> None:
-        self._path = path
         self._decoder = AudioDecoder(path)
         self._device: MiniaudioDevice | None = None
         self._stream: AudioStream | None = None
 
     def play(self) -> None:
-        """Start continuous playback."""
+        """Start playback."""
         if self._device is not None:
             return
 
         self._stream = self._loop_stream()
-        next(self._stream)
-
         self._device = MiniaudioDevice(self._stream)
+
         self._device.start()
 
     def stop(self) -> None:
@@ -45,12 +41,37 @@ class AudioPlayer:
         self._stream = None
 
     def _loop_stream(self) -> AudioStream:
-        """Create an endless stream that restarts at EOF."""
-        while True:
-            stream = self._decoder.stream()
+        decoder_stream = None
+        buffer = array("h")
 
-            try:
-                yield from stream
-            except GeneratorExit:
-                stream.close()
-                raise
+        try:
+            requested_frames = yield array("h")
+
+            while True:
+                required_samples = requested_frames * 2
+
+                while len(buffer) < required_samples:
+                    if decoder_stream is None:
+                        decoder_stream = self._decoder.stream()
+
+                    try:
+                        chunk = next(decoder_stream)
+                    except StopIteration:
+                        decoder_stream.close()
+                        decoder_stream = None
+                        continue
+
+                    buffer.extend(chunk)
+
+                output = array(
+                    "h",
+                    buffer[:required_samples],
+                )
+
+                del buffer[:required_samples]
+
+                requested_frames = yield output
+
+        finally:
+            if decoder_stream is not None:
+                decoder_stream.close()

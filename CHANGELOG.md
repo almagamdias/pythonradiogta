@@ -28,3 +28,7 @@
 
 
 ## feat: add streaming audio playback
+
+## test: verify seamless gen1 audio loop
+
+## feat: add seamless gen1 audio loop

@@ -1,11 +1,10 @@
 from __future__ import annotations
-
-from collections.abc import Generator
-
 import miniaudio
 
+from array import array
+from collections.abc import Generator
 
-AudioGenerator = Generator[bytes, int, None]
+AudioGenerator = Generator[array, int, None]
 
 
 class MiniaudioDevice:
