@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from array import array
+from collections.abc import Generator
+from pathlib import Path
+
+import miniaudio
+
+from radio.constants import AUDIO_CHANNELS, AUDIO_SAMPLE_RATE
+
+
+AudioStream = Generator[array, int, None]
+
+DECODE_FRAMES = 4096
+
+
+class AudioDecoder:
+    """Stream decoded audio from a file."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def stream(self) -> AudioStream:
+        """Create a PCM stream for the audio file."""
+        return miniaudio.stream_file(
+            filename=str(self._path),
+            output_format=miniaudio.SampleFormat.SIGNED16,
+            nchannels=AUDIO_CHANNELS,
+            sample_rate=AUDIO_SAMPLE_RATE,
+            frames_to_read=DECODE_FRAMES,
+        )

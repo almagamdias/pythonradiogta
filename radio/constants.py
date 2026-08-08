@@ -11,3 +11,6 @@ LOGO_NAMES = (
     "logo.webp",
     "logo.bmp",
 )
+
+AUDIO_CHANNELS = 2
+AUDIO_SAMPLE_RATE = 48_000
