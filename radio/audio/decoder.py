@@ -21,7 +21,7 @@ class AudioDecoder:
         self._path = path
 
     def stream(self) -> AudioStream:
-        """Create a PCM stream for the audio file."""
+        """Create a new PCM stream."""
         return miniaudio.stream_file(
             filename=str(self._path),
             output_format=miniaudio.SampleFormat.SIGNED16,
