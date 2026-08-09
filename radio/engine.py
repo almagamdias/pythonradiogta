@@ -5,6 +5,7 @@ from radio.model.song import Song
 from radio.model.station import Station
 from radio.model.station_library import StationLibrary
 
+import random
 
 class RadioEngine:
     """Main public API of the radio simulator."""
@@ -30,7 +31,14 @@ class RadioEngine:
         if self._player is not None:
             return
 
-        self._player = AudioPlayer(self.current_song.path)
+        start_position = self._random_start_position(
+            self.current_song.duration
+        )
+
+        self._player = AudioPlayer(
+            self.current_song.path,
+            start_position_ms=start_position,
+        )
         self._player.play()
 
     def stop(self) -> None:
@@ -39,3 +47,14 @@ class RadioEngine:
 
         self._player.stop()
         self._player = None
+
+    def _random_start_position(self, duration_ms: int) -> int:
+        margin_ms = min(10_000, duration_ms // 10)
+
+        if duration_ms <= margin_ms:
+            return 0
+
+        return random.randrange(
+            0,
+            duration_ms - margin_ms,
+        )

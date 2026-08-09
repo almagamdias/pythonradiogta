@@ -6,6 +6,8 @@ from pathlib import Path
 
 from radio.audio.decoder import AudioDecoder
 from radio.audio.device import MiniaudioDevice
+from radio.constants import AUDIO_SAMPLE_RATE
+from radio.model.types import Milliseconds
 
 
 AudioStream = Generator[array, int, None]
@@ -14,8 +16,15 @@ AudioStream = Generator[array, int, None]
 class AudioPlayer:
     """Play one audio file continuously."""
 
-    def __init__(self, path: Path) -> None:
-        self._decoder = AudioDecoder(path)
+    def __init__(
+        self,
+        path: Path,
+        *,
+        start_position_ms: Milliseconds = 0,
+    ) -> None:
+        self._path = path
+        self._start_position_ms = start_position_ms
+
         self._device: MiniaudioDevice | None = None
         self._stream: AudioStream | None = None
 
@@ -43,6 +52,11 @@ class AudioPlayer:
     def _loop_stream(self) -> AudioStream:
         decoder_stream = None
         buffer = array("h")
+        first_stream = True
+
+        start_frame = (
+            self._start_position_ms * AUDIO_SAMPLE_RATE // 1000
+        )
 
         try:
             requested_frames = yield array("h")
@@ -52,7 +66,17 @@ class AudioPlayer:
 
                 while len(buffer) < required_samples:
                     if decoder_stream is None:
-                        decoder_stream = self._decoder.stream()
+                        decoder = AudioDecoder(
+                            self._path,
+                            start_frame=(
+                                start_frame
+                                if first_stream
+                                else 0
+                            ),
+                        )
+
+                        decoder_stream = decoder.stream()
+                        first_stream = False
 
                     try:
                         chunk = next(decoder_stream)

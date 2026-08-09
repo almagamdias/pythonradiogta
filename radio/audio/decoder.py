@@ -15,8 +15,14 @@ AudioStream = Generator[array, int, None]
 class AudioDecoder:
     """Stream decoded audio from a file."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        start_frame: int = 0,
+    ) -> None:
         self._path = path
+        self._start_frame = start_frame
 
     def stream(self) -> AudioStream:
         """Create a new PCM stream."""
@@ -26,4 +32,5 @@ class AudioDecoder:
             nchannels=AUDIO_CHANNELS,
             sample_rate=AUDIO_SAMPLE_RATE,
             frames_to_read=4096,
+            seek_frame=self._start_frame,
         )
