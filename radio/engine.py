@@ -58,3 +58,29 @@ class RadioEngine:
             0,
             duration_ms - margin_ms,
         )
+
+    def next_station(self) -> None:
+        was_playing = self._player is not None
+
+        if was_playing:
+            self.stop()
+
+        self._station_index = (
+            self._station_index + 1
+        ) % len(self._library)
+
+        if was_playing:
+            self.play()
+
+    def previous_station(self) -> None:
+        was_playing = self._player is not None
+
+        if was_playing:
+            self.stop()
+
+        self._station_index = (
+            self._station_index - 1
+        ) % len(self._library)
+
+        if was_playing:
+            self.play()
