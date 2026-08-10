@@ -6,6 +6,9 @@ from radio.model.station import Station
 from radio.model.station_library import StationLibrary
 from radio.model.station_state import StationState
 from radio.util.timer import SwitchTimer
+from radio.constants import SWITCH_NOISE_PATH
+
+from pathlib import Path
 
 import random
 
@@ -108,6 +111,9 @@ class RadioEngine:
     def _begin_switch(self, station_index: int) -> None:
         self._pending_station_index = station_index
         self._state = StationState.SWITCHING
+
+        if self._player is not None:
+            self._player.play_overlay(SWITCH_NOISE_PATH)
 
         if self._switch_timer is None:
             self._switch_timer = SwitchTimer(

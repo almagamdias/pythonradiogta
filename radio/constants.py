@@ -14,3 +14,4 @@ LOGO_NAMES = (
 
 AUDIO_CHANNELS = 2
 AUDIO_SAMPLE_RATE = 48_000
+SWITCH_NOISE_PATH = "assets/sounds/switch_noise.ogg"
