@@ -4,6 +4,8 @@ from radio.audio.player import AudioPlayer
 from radio.model.song import Song
 from radio.model.station import Station
 from radio.model.station_library import StationLibrary
+from radio.model.station_state import StationState
+from radio.util.timer import SwitchTimer
 
 import random
 
@@ -14,6 +16,9 @@ class RadioEngine:
         self._library = library
         self._station_index = 0
         self._player: AudioPlayer | None = None
+        self._state = StationState.OFF
+        self._switch_timer: SwitchTimer | None = None
+        self._pending_station_index: int | None = None
 
     @property
     def stations(self) -> StationLibrary:
@@ -27,6 +32,10 @@ class RadioEngine:
     def current_song(self) -> Song:
         return self.current_station.songs[0]
 
+    @property
+    def state(self) -> StationState:
+        return self._state
+
     def play(self) -> None:
         if self._player is not None:
             return
@@ -39,14 +48,17 @@ class RadioEngine:
             self.current_song.path,
             start_position_ms=start_position,
         )
+        self._state = StationState.ON_AIR
         self._player.play()
 
     def stop(self) -> None:
         if self._player is None:
+            self._state = StationState.OFF
             return
 
         self._player.stop()
         self._player = None
+        self._state = StationState.OFF
 
     def _random_start_position(self, duration_ms: int) -> int:
         margin_ms = min(10_000, duration_ms // 10)
@@ -60,27 +72,59 @@ class RadioEngine:
         )
 
     def next_station(self) -> None:
-        was_playing = self._player is not None
+        base_index = (
+            self._pending_station_index
+            if self._pending_station_index is not None
+            else self._station_index
+        )
 
-        if was_playing:
-            self.stop()
-
-        self._station_index = (
-            self._station_index + 1
+        next_index = (
+            base_index + 1
         ) % len(self._library)
 
-        if was_playing:
-            self.play()
+        if self._state is StationState.OFF:
+            self._station_index = next_index
+            return
+
+        self._begin_switch(next_index)
 
     def previous_station(self) -> None:
-        was_playing = self._player is not None
+        base_index = (
+            self._pending_station_index
+            if self._pending_station_index is not None
+            else self._station_index
+        )
 
-        if was_playing:
-            self.stop()
-
-        self._station_index = (
-            self._station_index - 1
+        previous_index = (
+            base_index - 1
         ) % len(self._library)
 
-        if was_playing:
-            self.play()
+        if self._state is StationState.OFF:
+            self._station_index = previous_index
+            return
+
+        self._begin_switch(previous_index)
+
+    def _begin_switch(self, station_index: int) -> None:
+        self._pending_station_index = station_index
+        self._state = StationState.SWITCHING
+
+        if self._switch_timer is None:
+            self._switch_timer = SwitchTimer(
+                delay=1.1,
+                callback=self._complete_switch,
+            )
+
+        self._switch_timer.start()
+
+    def _complete_switch(self) -> None:
+        station_index = self._pending_station_index
+
+        if station_index is None:
+            return
+
+        self._station_index = station_index
+        self._pending_station_index = None
+
+        self.stop()
+        self.play()
