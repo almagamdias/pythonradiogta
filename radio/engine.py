@@ -39,6 +39,17 @@ class RadioEngine:
     def state(self) -> StationState:
         return self._state
 
+    @property
+    def is_switching(self) -> bool:
+        return self._state is StationState.SWITCHING
+
+    @property
+    def pending_station(self) -> Station | None:
+        if self._pending_station_index is None:
+            return None
+
+        return self._library[self._pending_station_index]
+
     def play(self) -> None:
         if self._player is not None:
             return
