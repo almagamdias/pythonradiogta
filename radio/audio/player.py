@@ -34,10 +34,23 @@ class AudioPlayer:
         self._overlay_lock = Lock()
         self._overlay_count = 0
 
+        self._volume = 1.0
+
     @property
     def overlay_count(self) -> int:
         """Return the number of requested overlays."""
         return self._overlay_count
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    @volume.setter
+    def volume(self, value: float) -> None:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("Volume must be between 0.0 and 1.0")
+
+        self._volume = value
 
     def play(self) -> None:
         """Start playback."""
@@ -75,6 +88,15 @@ class AudioPlayer:
             self._overlay_path = None
 
         return path
+
+    def _apply_volume(self, pcm: array) -> array:
+        if self._volume == 1.0:
+            return pcm
+
+        return array(
+            pcm.typecode,
+            (int(sample * self._volume) for sample in pcm),
+        )
 
     def _loop_stream(self) -> AudioStream:
         decoder_stream = None

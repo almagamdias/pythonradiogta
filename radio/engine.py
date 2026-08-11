@@ -16,6 +16,7 @@ class RadioEngine:
     """Main public API of the radio simulator."""
 
     def __init__(self, library: StationLibrary) -> None:
+        self._volume = 1.0
         self._library = library
         self._station_index = 0
         self._player: AudioPlayer | None = None
@@ -50,6 +51,20 @@ class RadioEngine:
 
         return self._library[self._pending_station_index]
 
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    @volume.setter
+    def volume(self, value: float) -> None:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("Volume must be between 0.0 and 1.0")
+
+        self._volume = float(value)
+
+        if self._player is not None:
+            self._player.volume = self._volume
+
     def play(self) -> None:
         if self._player is not None:
             return
@@ -62,6 +77,8 @@ class RadioEngine:
             self.current_song.path,
             start_position_ms=start_position,
         )
+
+        self._player.volume = self._volume
         self._state = StationState.ON_AIR
         self._player.play()
 
@@ -128,7 +145,7 @@ class RadioEngine:
 
         if self._switch_timer is None:
             self._switch_timer = SwitchTimer(
-                delay=1.1,
+                delay=1.5,
                 callback=self._complete_switch,
             )
 
