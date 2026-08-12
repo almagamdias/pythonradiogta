@@ -190,6 +190,7 @@ class AudioPlayer:
 
                     del overlay_buffer[:overlay_samples]
 
+                output = self._apply_volume(output)
                 requested_frames = yield output
 
         finally:
