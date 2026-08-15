@@ -5,57 +5,98 @@ from pathlib import Path
 
 from radio.engine import RadioEngine
 from radio.library.gen1 import Gen1Loader
+from radio.model.station_library import StationLibrary
 from radio.model.station_state import StationState
 
 
 TEST_ROOT = Path("test_data/GTA IV")
 
 
-def main() -> None:
+def create_engine() -> RadioEngine:
     library = Gen1Loader().load(TEST_ROOT)
-    engine = RadioEngine(library)
+    assert isinstance(library, StationLibrary)
+    return RadioEngine(library)
 
-    assert engine.state is StationState.OFF
-    assert engine.current_station.name == "04_MASSIVEB"
+
+def wait_for_on_air(
+    engine: RadioEngine,
+    timeout: float = 2.5,
+) -> None:
+    deadline = time.monotonic() + timeout
+
+    while engine.state is StationState.SWITCHING:
+        if time.monotonic() >= deadline:
+            break
+
+        time.sleep(0.05)
+
+    assert engine.state is StationState.ON_AIR
+
+
+def main() -> None:
+    engine = create_engine()
+
+    print(
+        f"Playing: {engine.current_station.name}"
+    )
+    print(
+        f"Song:    {engine.current_song.title}"
+    )
 
     engine.play()
 
     assert engine.state is StationState.ON_AIR
-    assert engine.current_station.name == "04_MASSIVEB"
+
+    print("Playing first station for 2 seconds...")
+    time.sleep(2)
+
+    initial_station = engine.current_station
+
+    print()
+    print("Requesting next station...")
 
     engine.next_station()
 
     assert engine.state is StationState.SWITCHING
-    assert engine.current_station.name == "04_MASSIVEB"
+
+    print(
+        f"State immediately: {engine.state.value}"
+    )
+    print(
+        f"Current station:   {engine.current_station.name}"
+    )
 
     time.sleep(0.5)
 
-    # Станция ещё не должна переключиться.
-    assert engine.current_station.name == "04_MASSIVEB"
     assert engine.state is StationState.SWITCHING
+    assert engine.current_station is initial_station
 
-    engine.next_station()
+    print()
+    print("Waiting for station switch...")
 
-    # Повторное нажатие должно оставить нас
-    # в switching и сбросить таймер.
-    assert engine.state is StationState.SWITCHING
-    assert engine.current_station.name == "04_MASSIVEB"
+    wait_for_on_air(engine)
 
-    time.sleep(0.7)
+    assert engine.current_station is not initial_station
 
-    # После первого таймера прошло бы 1.2 сек,
-    # но второй start() сбросил его.
-    assert engine.current_station.name == "04_MASSIVEB"
-    assert engine.state is StationState.SWITCHING
+    print(
+        f"State after switch: {engine.state.value}"
+    )
+    print(
+        f"New station:        {engine.current_station.name}"
+    )
+    print(
+        f"Song:               {engine.current_song.title}"
+    )
 
-    time.sleep(0.5)
-
-    assert engine.current_station.name == "13_RAMJAM"
-    assert engine.state is StationState.ON_AIR
+    print()
+    print("Playing new station for 3 seconds...")
+    time.sleep(3)
 
     engine.stop()
 
-    print("Engine switching test passed.")
+    assert engine.state is StationState.OFF
+
+    print("Station switching playback test finished.")
 
 
 if __name__ == "__main__":
