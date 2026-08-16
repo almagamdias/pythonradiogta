@@ -24,6 +24,11 @@ class RadioWindow:
         self._root.geometry("1150x340")
         self._root.resizable(False, False)
 
+        self._root.protocol(
+            "WM_DELETE_WINDOW",
+            self._on_close,
+        )
+
         self._carousel = StationCarousel(
             self._root,
             engine,
@@ -44,6 +49,11 @@ class RadioWindow:
 
         self._bind_input()
         self._poll_pending_station()
+
+    def _on_close(self) -> None:
+        """Stop radio playback and close the GUI."""
+        self._engine.stop()
+        self._root.destroy()
 
     def _poll_pending_station(self) -> None:
         """Watch radio state for carousel visibility."""
