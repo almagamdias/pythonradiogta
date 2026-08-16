@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "miniaudio>=1.61",
     "mutagen>=1.47",
+    "Pillow>=12.3.0",
 ]
 
 [tool.pyright]

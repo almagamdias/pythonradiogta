@@ -1,26 +1,19 @@
 from pathlib import Path
 
+from gui.app import RadioApp
+from radio.engine import RadioEngine
 from radio.library.gen1 import Gen1Loader
 
 
 def main() -> None:
-    loader = Gen1Loader()
-
-    library = loader.load(
+    library = Gen1Loader().load(
         Path("test_data/GTA IV")
     )
 
-    print(f"Stations: {len(library.stations)}")
-    print()
+    engine = RadioEngine(library)
 
-    for station in library.stations:
-        song = station.songs[0]
-
-        print(station.name)
-        print(f"  Song     : {song.title}")
-        print(f"  Duration : {song.duration} ms")
-        print(f"  Logo     : {station.logo}")
-        print()
+    app = RadioApp(engine)
+    app.run()
 
 
 if __name__ == "__main__":
