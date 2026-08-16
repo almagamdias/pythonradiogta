@@ -250,7 +250,7 @@ class RadioEngine:
             and not self._switch_overlay_active
         ):
             self._player.play_overlay(
-                SWITCH_NOISE_PATH
+                SWITCH_NOISE_PATH, loop=True
             )
 
             self._switch_overlay_active = True
@@ -290,5 +290,6 @@ class RadioEngine:
             self.current_song.path,
             start_position_ms=position,
         )
+        self._player.stop_overlay()
 
         self._state = StationState.ON_AIR
