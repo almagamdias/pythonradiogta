@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import Misc
+
+from PIL import Image, ImageTk
 
 from radio.engine import RadioEngine
 from radio.model.station import Station
 
-from gui.assets import load_logo
+from gui.assets import (
+    load_logo_image,
+    make_logo_frame,
+)
 
 
 SLOT_WIDTH = 190
@@ -22,6 +28,13 @@ ANIMATION_STEPS = 10
 
 STEP_WIDTH = SLOT_WIDTH + SLOT_GAP
 
+FADE_OUT_DELAY_MS = 2800
+FADE_OUT_DURATION_MS = 100
+FADE_OUT_STEPS = 20
+FADE_OUT_STEP_MS = (
+    FADE_OUT_DURATION_MS // FADE_OUT_STEPS
+)
+
 
 class StationCarousel:
     """Display five stations around the pending station."""
@@ -33,7 +46,7 @@ class StationCarousel:
 
     def __init__(
         self,
-        parent: tk.Misc,
+        parent: Misc,
         engine: RadioEngine,
     ) -> None:
         self._engine = engine
@@ -50,19 +63,42 @@ class StationCarousel:
             pady=40,
         )
 
-        self._images: list[object | None] = []
-
+        # Canvas item IDs.
         self._items: list[int] = []
 
+        # Original RGBA PIL images.
+        self._logo_images: list[
+            Image.Image | None
+        ] = []
+
+        # Tk PhotoImage references.
+        self._images: list[
+            ImageTk.PhotoImage | None
+        ] = []
+
+        # Current five visible station indices.
+        self._visible_indices: list[int] = []
+
+        # Animation state.
         self._animation_running = False
         self._animation_direction = 0
         self._animation_step = 0
         self._animation_delta = 0.0
+
         self._animation_queue: list[int] = []
 
-        self._visible_indices: list[int] = []
+        # Visibility / fade state.
+        #
+        # IMPORTANT:
+        # Initial state is completely transparent.
+        self._alpha = 0
+
+        self._fade_out_delay_id: str | None = None
+        self._fade_out_after_id: str | None = None
 
         self._draw_slots()
+
+        # Build the carousel while completely transparent.
         self.refresh()
 
     def _draw_slots(self) -> None:
@@ -82,8 +118,104 @@ class StationCarousel:
                 tags="slot",
             )
 
+    # ------------------------------------------------------------------
+    # Visibility
+    # ------------------------------------------------------------------
+
+    def show(self) -> None:
+        """
+        Show the carousel immediately.
+
+        There is intentionally NO fade-in.
+        """
+        self._cancel_fade_out()
+
+        if self._alpha == 255:
+            return
+
+        self._alpha = 255
+
+        self._rebuild_visible()
+
+    def schedule_fade_out(self) -> None:
+        """Schedule fade-out after the final station selection."""
+        self._cancel_fade_out()
+
+        if self._alpha <= 0:
+            return
+
+        if self._engine.pending_station is not None:
+            return
+
+        self._fade_out_delay_id = self._canvas.after(
+            FADE_OUT_DELAY_MS,
+            self._start_fade_out,
+        )
+
+    def _start_fade_out(self) -> None:
+        """Start the two-second fade-out."""
+        self._fade_out_delay_id = None
+
+        if self._engine.pending_station is not None:
+            return
+
+        if self._alpha <= 0:
+            return
+
+        self._fade_out_step()
+
+    def _fade_out_step(self) -> None:
+        """Perform one fade-out frame."""
+        if self._alpha <= 0:
+            self._alpha = 0
+            self._fade_out_after_id = None
+            return
+
+        self._alpha = max(
+            0,
+            self._alpha
+            - (
+                255
+                // FADE_OUT_STEPS
+            ),
+        )
+
+        self._rebuild_visible()
+
+        if self._alpha <= 0:
+            self._alpha = 0
+            self._fade_out_after_id = None
+            return
+
+        self._fade_out_after_id = (
+            self._canvas.after(
+                FADE_OUT_STEP_MS,
+                self._fade_out_step,
+            )
+        )
+
+    def _cancel_fade_out(self) -> None:
+        """Cancel any pending or active fade-out."""
+        if self._fade_out_delay_id is not None:
+            self._canvas.after_cancel(
+                self._fade_out_delay_id,
+            )
+
+            self._fade_out_delay_id = None
+
+        if self._fade_out_after_id is not None:
+            self._canvas.after_cancel(
+                self._fade_out_after_id,
+            )
+
+            self._fade_out_after_id = None
+
+    # ------------------------------------------------------------------
+    # Station layout
+    # ------------------------------------------------------------------
+
     def refresh(self) -> None:
-        """Synchronously rebuild the visible five stations."""
+        """Synchronously rebuild the five visible stations."""
         if self._animation_running:
             return
 
@@ -108,6 +240,7 @@ class StationCarousel:
         self._canvas.delete("station")
 
         self._items.clear()
+        self._logo_images.clear()
         self._images.clear()
 
         for position, station_index in enumerate(
@@ -145,13 +278,23 @@ class StationCarousel:
                 tags="station",
             )
 
+            self._logo_images.append(None)
             self._images.append(None)
 
             return item
 
-        image = load_logo(
+        # Load the original RGBA image.
+        logo = load_logo_image(
             station.logo,
             size=self.LOGO_SIZE,
+        )
+
+        self._logo_images.append(logo)
+
+        # Create a Tk frame with current alpha.
+        image = make_logo_frame(
+            logo,
+            alpha=self._alpha,
         )
 
         self._images.append(image)
@@ -164,29 +307,54 @@ class StationCarousel:
             tags="station",
         )
 
+    # ------------------------------------------------------------------
+    # Carousel animation
+    # ------------------------------------------------------------------
+
     def animate_next(self) -> None:
         """Queue one forward carousel movement."""
+        self._cancel_fade_out()
+
+        # First input makes the carousel instantly visible.
+        self.show()
+
         self._animation_queue.append(1)
 
         if not self._animation_running:
             self._start_queued_animation()
 
-
     def animate_previous(self) -> None:
         """Queue one backward carousel movement."""
+        self._cancel_fade_out()
+
+        # First input makes the carousel instantly visible.
+        self.show()
+
         self._animation_queue.append(-1)
 
         if not self._animation_running:
             self._start_queued_animation()
+
+    def _start_queued_animation(self) -> None:
+        """Start the next queued visual movement."""
+        if self._animation_running:
+            return
+
+        if not self._animation_queue:
+            return
+
+        direction = self._animation_queue.pop(0)
+
+        self._start_animation(
+            direction=direction,
+        )
 
     def _start_animation(
         self,
         *,
         direction: int,
     ) -> None:
-        if self._animation_running:
-            return
-
+        """Start one carousel animation."""
         stations = self._engine.stations
 
         if not stations:
@@ -217,7 +385,9 @@ class StationCarousel:
                 current_center + 3
             ) % len(stations)
 
-            incoming_position = self.VISIBLE_COUNT
+            incoming_position = (
+                self.VISIBLE_COUNT
+            )
 
         else:
             incoming_index = (
@@ -236,7 +406,7 @@ class StationCarousel:
         self._items.append(item)
 
     def _animate_step(self) -> None:
-        """Animate one frame of the current carousel movement."""
+        """Animate one frame."""
         if not self._animation_running:
             return
 
@@ -266,7 +436,9 @@ class StationCarousel:
             - self._animation_delta
         )
 
-        self._animation_delta = current_distance
+        self._animation_delta = (
+            current_distance
+        )
 
         if self._animation_direction > 0:
             delta_x = -delta
@@ -291,27 +463,8 @@ class StationCarousel:
             self._animate_step,
         )
 
-    def _start_queued_animation(self) -> None:
-        """Start the next queued carousel movement."""
-        if self._animation_running:
-            return
-
-        if not self._animation_queue:
-            return
-
-        direction = self._animation_queue.pop(0)
-
-        self._animation_running = True
-        self._animation_direction = direction
-        self._animation_step = 0
-        self._animation_delta = 0.0
-
-        self._prepare_animation()
-
-        self._animate_step()
-
     def _finish_animation(self) -> None:
-        """Finish one animation and continue the visual queue."""
+        """Finish one movement and continue the queue."""
         direction = self._animation_direction
 
         self._animation_running = False
@@ -320,24 +473,18 @@ class StationCarousel:
         self._animation_delta = 0.0
 
         if direction > 0:
-            # next_station:
-            # 04 12 13 18 19
-            # ->
-            # 12 13 18 19 23
             self._visible_indices = [
-                (index + 1)
-                % len(self._engine.stations)
+                (
+                    index + 1
+                ) % len(self._engine.stations)
                 for index in self._visible_indices
             ]
 
         else:
-            # previous_station:
-            # 12 13 18 19 23
-            # <-
-            # 04 12 13 18 19
             self._visible_indices = [
-                (index - 1)
-                % len(self._engine.stations)
+                (
+                    index - 1
+                ) % len(self._engine.stations)
                 for index in self._visible_indices
             ]
 
@@ -345,6 +492,10 @@ class StationCarousel:
 
         if self._animation_queue:
             self._start_queued_animation()
+
+    # ------------------------------------------------------------------
+    # Center station
+    # ------------------------------------------------------------------
 
     def _center_index(self) -> int:
         """Return the station index represented in the center."""
@@ -357,10 +508,13 @@ class StationCarousel:
                 if station is pending:
                     return index
 
-        for index, station in enumerate(
-            self._engine.stations
-        ):
-            if station is self._engine.current_station:
-                return index
+        current = self._engine.current_station
+
+        if current is not None:
+            for index, station in enumerate(
+                self._engine.stations
+            ):
+                if station is current:
+                    return index
 
         return 0

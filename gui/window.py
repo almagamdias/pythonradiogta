@@ -7,6 +7,7 @@ from radio.engine import RadioEngine
 
 from gui.carousel import StationCarousel
 
+
 BACKEND_INPUT_COOLDOWN_MS = 100
 
 
@@ -29,16 +30,67 @@ class RadioWindow:
         )
 
         self._backend_input_locked = False
-
         self._last_wheel_time = 0.0
 
+        self._last_pending_station = (
+            engine.pending_station
+        )
+
+        self._last_current_station = (
+            engine.current_station
+        )
+
+        self._pending_poll_id: str | None = None
+
         self._bind_input()
+        self._poll_pending_station()
+
+    def _poll_pending_station(self) -> None:
+        """Watch radio state for carousel visibility."""
+
+        pending = self._engine.pending_station
+        current = self._engine.current_station
+
+        pending_changed = (
+            pending is not self._last_pending_station
+        )
+
+        current_changed = (
+            current is not self._last_current_station
+        )
+
+        if pending_changed:
+            self._last_pending_station = pending
+
+            if pending is not None:
+                # A station selection has started.
+                self._carousel.show()
+
+        if current_changed:
+            self._last_current_station = current
+
+        # The selection is finalized when there is no pending
+        # station and the current station is up to date.
+        if (
+            pending is None
+            and (
+                pending_changed
+                or current_changed
+            )
+        ):
+            self._carousel.schedule_fade_out()
+
+        self._pending_poll_id = self._root.after(
+            50,
+            self._poll_pending_station,
+        )
 
     def _bind_input(self) -> None:
         self._root.bind(
             "<Left>",
             self._previous_station,
         )
+
         self._root.bind(
             "<Right>",
             self._next_station,
@@ -49,6 +101,7 @@ class RadioWindow:
             "<Button-4>",
             self._wheel_up,
         )
+
         self._root.bind(
             "<Button-5>",
             self._wheel_down,
@@ -71,7 +124,6 @@ class RadioWindow:
             self._unlock_backend_input,
         )
 
-
     def _next_station(
         self,
         event: tk.Event | None = None,
@@ -89,7 +141,6 @@ class RadioWindow:
             self._unlock_backend_input,
         )
 
-
     def _unlock_backend_input(self) -> None:
         self._backend_input_locked = False
 
@@ -103,6 +154,7 @@ class RadioWindow:
             return False
 
         self._last_wheel_time = now
+
         return True
 
     def _wheel_up(

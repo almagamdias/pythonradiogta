@@ -5,40 +5,52 @@ from pathlib import Path
 from PIL import Image, ImageTk
 
 
-def load_logo(
+def load_logo_image(
     path: Path,
     *,
     size: tuple[int, int],
-    alpha: int = 255,
-) -> ImageTk.PhotoImage:
-    """Load, resize and apply transparency to a station logo."""
+) -> Image.Image:
+    """Load and resize a station logo as RGBA."""
     with Image.open(path) as source:
         image = source.convert("RGBA")
-        image.thumbnail(
-            size,
-            Image.Resampling.LANCZOS,
-        )
 
-        canvas = Image.new(
-            "RGBA",
-            size,
-            (0, 0, 0, 0),
-        )
+    image.thumbnail(
+        size,
+        Image.Resampling.LANCZOS,
+    )
 
-        x = (size[0] - image.width) // 2
-        y = (size[1] - image.height) // 2
+    canvas = Image.new(
+        "RGBA",
+        size,
+        (0, 0, 0, 0),
+    )
 
-        canvas.paste(
-            image,
-            (x, y),
-            image,
-        )
+    x = (size[0] - image.width) // 2
+    y = (size[1] - image.height) // 2
 
-        if alpha != 255:
-            alpha_channel = canvas.getchannel("A")
-            alpha_channel = alpha_channel.point(
-                lambda value: value * alpha // 255,
-            )
-            canvas.putalpha(alpha_channel)
+    canvas.paste(
+        image,
+        (x, y),
+        image,
+    )
 
-    return ImageTk.PhotoImage(canvas)
+    return canvas
+
+
+def make_logo_frame(
+    image: Image.Image,
+    *,
+    alpha: int,
+) -> ImageTk.PhotoImage:
+    """Create one cached Tk frame for a logo alpha."""
+    frame = image.copy()
+
+    alpha_channel = frame.getchannel("A")
+
+    alpha_channel = alpha_channel.point(
+        lambda value: value * alpha // 255,
+    )
+
+    frame.putalpha(alpha_channel)
+
+    return ImageTk.PhotoImage(frame)
