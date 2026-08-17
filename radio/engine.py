@@ -150,7 +150,7 @@ class RadioEngine:
         ) % len(self._library)
 
         if self._state is StationState.OFF:
-            self._station_index = next_index
+            self._select_station_off_air(next_index)
             return
 
         self._begin_switch(next_index)
@@ -167,10 +167,37 @@ class RadioEngine:
         ) % len(self._library)
 
         if self._state is StationState.OFF:
-            self._station_index = previous_index
+            self._select_station_off_air(previous_index)
             return
 
         self._begin_switch(previous_index)
+
+    def _select_station_off_air(
+        self,
+        station_index: int,
+    ) -> None:
+        """
+        Select a station immediately while the engine is OFF.
+
+        OFF does not mean that an already-running audio player must
+        stop. If a player exists, its actual playback source is
+        changed immediately without switch delay or overlay.
+
+        If no player exists, only the selected station changes.
+        """
+        self._station_index = station_index
+
+        if self._player is None:
+            return
+
+        position = self._station_position(
+            station_index
+        )
+
+        self._player.change_song(
+            self.current_song.path,
+            start_position_ms=position,
+        )
 
     def _initialize_station_timelines(self) -> None:
         self._radio_started_at = monotonic()
@@ -250,7 +277,8 @@ class RadioEngine:
             and not self._switch_overlay_active
         ):
             self._player.play_overlay(
-                SWITCH_NOISE_PATH, loop=True
+                SWITCH_NOISE_PATH,
+                loop=True,
             )
 
             self._switch_overlay_active = True
@@ -290,6 +318,7 @@ class RadioEngine:
             self.current_song.path,
             start_position_ms=position,
         )
+
         self._player.stop_overlay()
 
         self._state = StationState.ON_AIR
