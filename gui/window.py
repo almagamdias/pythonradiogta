@@ -8,7 +8,7 @@ from radio.engine import RadioEngine
 from gui.carousel import StationCarousel
 
 
-BACKEND_INPUT_COOLDOWN_MS = 100
+BACKEND_INPUT_COOLDOWN_MS = 30
 
 
 class RadioWindow:
