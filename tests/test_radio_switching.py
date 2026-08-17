@@ -607,6 +607,326 @@ def test_switch_overlay_starts_only_once() -> None:
             original_timer,
         )
 
+def test_off_station_selection_changes_playback_immediately() -> None:
+    """
+    OFF does not stop an existing player.
+
+    Selecting another station while OFF must immediately change
+    the actual playback source without switch timer or overlay.
+    """
+    original_player, original_timer = _install_fakes()
+
+    try:
+        engine = _make_engine()
+
+        # Simulate an already-running broadcast while the GUI/radio
+        # state is OFF.
+        engine.play()
+        engine._state = StationState.OFF
+
+        player = engine.player
+
+        engine.next_station()
+
+        assert engine.state is StationState.OFF
+        assert engine.current_station.name == "Station B"
+
+        assert engine.pending_station is None
+
+        assert player.overlay_calls == []
+        assert player.stop_overlay_calls == 0
+
+        assert FakeSwitchTimer.instances == []
+
+        assert player.change_song_calls == [
+            (
+                Path("station_b.ogg"),
+                player.change_song_calls[0][1],
+            )
+        ]
+
+    finally:
+        _restore_fakes(
+            original_player,
+            original_timer,
+        )
+
+
+def test_off_previous_station_changes_playback_immediately() -> None:
+    """
+    Selecting the previous station while OFF changes playback
+    immediately and does not start the switching sequence.
+    """
+    original_player, original_timer = _install_fakes()
+
+    try:
+        engine = _make_engine()
+
+        engine.play()
+        engine._state = StationState.OFF
+
+        player = engine.player
+
+        engine.previous_station()
+
+        assert engine.state is StationState.OFF
+        assert engine.current_station.name == "Station E"
+
+        assert engine.pending_station is None
+
+        assert player.overlay_calls == []
+        assert player.stop_overlay_calls == 0
+
+        assert FakeSwitchTimer.instances == []
+
+        assert (
+            player.change_song_calls[-1][0]
+            == Path("station_e.ogg")
+        )
+
+    finally:
+        _restore_fakes(
+            original_player,
+            original_timer,
+        )
+
+
+def test_off_station_selection_does_not_create_switch_sequence() -> None:
+    """
+    Station selection while OFF must never enter SWITCHING.
+    """
+    original_player, original_timer = _install_fakes()
+
+    try:
+        engine = _make_engine()
+
+        engine.play()
+        engine._state = StationState.OFF
+
+        player = engine.player
+
+        engine.next_station()
+        engine.next_station()
+        engine.previous_station()
+
+        assert engine.state is StationState.OFF
+
+        # A -> B -> C -> B
+        assert engine.current_station.name == "Station B"
+
+        assert engine.pending_station is None
+
+        assert player.overlay_calls == []
+        assert player.stop_overlay_calls == 0
+
+        assert FakeSwitchTimer.instances == []
+
+        assert len(
+            player.change_song_calls
+        ) == 3
+
+    finally:
+        _restore_fakes(
+            original_player,
+            original_timer,
+        )
+
+def test_station_timeline_advances_with_time() -> None:
+    """
+    Each station has its own virtual timeline.
+
+    The station position must advance by the amount of time
+    elapsed since the radio started.
+    """
+    original_player, original_timer = _install_fakes()
+    original_monotonic = engine_module.monotonic
+
+    current_time = 100.0
+
+    def fake_monotonic() -> float:
+        return current_time
+
+    engine_module.monotonic = fake_monotonic
+
+    try:
+        engine = _make_engine()
+        engine.play()
+
+        # Use deterministic station timelines.
+        engine._station_start_positions = {
+            0: 1_000,
+            1: 5_000,
+            2: 10_000,
+            3: 15_000,
+            4: 20_000,
+        }
+
+        # Radio started at t=100.0.
+        assert engine._station_position(0) == 1_000
+
+        current_time = 110.0
+
+        # 10 seconds have passed.
+        assert engine._station_position(0) == 11_000
+
+        current_time = 125.0
+
+        # 25 seconds have passed.
+        assert engine._station_position(0) == 26_000
+
+    finally:
+        engine_module.monotonic = original_monotonic
+
+        _restore_fakes(
+            original_player,
+            original_timer,
+        )
+
+
+def test_returning_to_station_preserves_its_timeline() -> None:
+    """
+    A -> B -> A must return to A's current virtual timeline
+    position rather than assigning A a new random position.
+    """
+    original_player, original_timer = _install_fakes()
+    original_monotonic = engine_module.monotonic
+
+    current_time = 100.0
+
+    def fake_monotonic() -> float:
+        return current_time
+
+    engine_module.monotonic = fake_monotonic
+
+    try:
+        engine = _make_engine()
+        engine.play()
+
+        player = engine.player
+
+        # Deterministic independent timelines.
+        engine._station_start_positions = {
+            0: 1_000,
+            1: 5_000,
+            2: 10_000,
+            3: 15_000,
+            4: 20_000,
+        }
+
+        # A starts at 01.000.
+        assert engine._station_position(0) == 1_000
+
+        # Move to B.
+        current_time = 110.0
+
+        engine.next_station()
+
+        timer = FakeSwitchTimer.instances[0]
+        timer.fire()
+
+        assert engine.current_station.name == "Station B"
+
+        # B should be at:
+        # 5_000 + 10_000 = 15_000 ms
+        assert player.change_song_calls[-1] == (
+            Path("station_b.ogg"),
+            15_000,
+        )
+
+        # Five more seconds pass.
+        current_time = 115.0
+
+        # Return B -> A.
+        engine.previous_station()
+
+        timer.fire()
+
+        assert engine.current_station.name == "Station A"
+
+        # A's timeline started at 1_000 ms.
+        #
+        # Total elapsed time:
+        # 115 - 100 = 15 seconds.
+        #
+        # Therefore:
+        # 1_000 + 15_000 = 16_000 ms.
+        assert player.change_song_calls[-1] == (
+            Path("station_a.ogg"),
+            16_000,
+        )
+
+        # A did not receive a new random position.
+        assert len(player.change_song_calls) == 2
+
+    finally:
+        engine_module.monotonic = original_monotonic
+
+        _restore_fakes(
+            original_player,
+            original_timer,
+        )
+
+
+def test_station_timeline_loops_after_song_duration() -> None:
+    """
+    A station timeline must wrap around when the elapsed time
+    exceeds the duration of its song.
+    """
+    original_player, original_timer = _install_fakes()
+    original_monotonic = engine_module.monotonic
+
+    current_time = 100.0
+
+    def fake_monotonic() -> float:
+        return current_time
+
+    engine_module.monotonic = fake_monotonic
+
+    try:
+        engine = _make_engine()
+        engine.play()
+
+        # Replace Station A with a deterministic timeline.
+        engine._station_start_positions = {
+            0: 110_000,
+            1: 5_000,
+            2: 10_000,
+            3: 15_000,
+            4: 20_000,
+        }
+
+        # All fake songs have duration 120_000 ms.
+        #
+        # Start: 110_000
+        # Elapsed: 15_000
+        #
+        # 110_000 + 15_000 = 125_000
+        #
+        # 125_000 % 120_000 = 5_000
+        current_time = 115.0
+
+        assert (
+            engine._station_position(0)
+            == 5_000
+        )
+
+        # Another 120 seconds should leave the
+        # position unchanged because the song loops.
+        current_time = 235.0
+
+        assert (
+            engine._station_position(0)
+            == 5_000
+        )
+
+    finally:
+        engine_module.monotonic = original_monotonic
+
+        _restore_fakes(
+            original_player,
+            original_timer,
+        )
+
 
 def run_all_tests() -> None:
     """Run all radio switching tests."""
@@ -621,6 +941,14 @@ def run_all_tests() -> None:
         test_stop_cancels_pending_switch,
         test_switch_timer_is_reused,
         test_switch_overlay_starts_only_once,
+        test_off_station_selection_changes_playback_immediately,
+        test_off_previous_station_changes_playback_immediately,
+        test_off_station_selection_does_not_create_switch_sequence,
+
+        # Gen1 station timeline tests.
+        test_station_timeline_advances_with_time,
+        test_returning_to_station_preserves_its_timeline,
+        test_station_timeline_loops_after_song_duration,
     ]
 
     for test in tests:

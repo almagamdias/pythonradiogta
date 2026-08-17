@@ -5,6 +5,8 @@ from collections.abc import Generator
 from pathlib import Path
 from threading import Lock
 
+import miniaudio
+
 from radio.audio.decoder import AudioDecoder
 from radio.audio.device import MiniaudioDevice
 from radio.audio.mixer import mix_pcm
@@ -13,6 +15,9 @@ from radio.model.types import Milliseconds
 
 
 AudioStream = Generator[array, int, None]
+
+FADE_OUT_DURATION_MS = 2_000
+CHANNELS = 2
 
 
 class AudioPlayer:
@@ -43,6 +48,11 @@ class AudioPlayer:
         ] | None = None
 
         self._volume = 1.0
+
+        self._duration_cache: dict[
+            Path,
+            int,
+        ] = {}
 
     @property
     def overlay_count(self) -> int:
@@ -83,7 +93,7 @@ class AudioPlayer:
         self._device = None
         self._stream = None
 
-        self._clear_overlay()
+        self.stop_overlay()
 
         with self._change_lock:
             self._pending_change = None
@@ -94,16 +104,9 @@ class AudioPlayer:
         start_position_ms: Milliseconds = 0,
     ) -> None:
         """
-        Change the current audio source without stopping playback.
-
-        The audio device remains alive.
-
-        Any overlay belonging to the previous source is cancelled
-        immediately from the control side and invalidated for the
-        audio stream.
+        Change the current audio source without stopping
+        the audio device.
         """
-        self._clear_overlay()
-
         with self._change_lock:
             self._pending_change = (
                 path,
@@ -117,10 +120,10 @@ class AudioPlayer:
         loop: bool = False,
     ) -> None:
         """
-        Queue an audio file to be mixed over the main stream.
+        Start an overlay.
 
-        If loop is True, the overlay restarts automatically after EOF.
-        A new overlay replaces a previously queued overlay.
+        If loop=True, the overlay restarts from the beginning
+        whenever its decoder reaches EOF.
         """
         with self._overlay_lock:
             self._overlay_generation += 1
@@ -129,16 +132,7 @@ class AudioPlayer:
             self._overlay_count += 1
 
     def stop_overlay(self) -> None:
-        """Stop the currently playing overlay."""
-        self._clear_overlay()
-
-    def _clear_overlay(self) -> None:
-        """
-        Cancel the current overlay.
-
-        The audio stream owns the decoder, so invalidation is done
-        through the generation counter.
-        """
+        """Stop the current overlay immediately."""
         with self._overlay_lock:
             self._overlay_generation += 1
             self._overlay_path = None
@@ -146,7 +140,11 @@ class AudioPlayer:
 
     def _take_overlay(
         self,
-    ) -> tuple[Path | None, bool, int]:
+    ) -> tuple[
+        Path | None,
+        bool,
+        int,
+    ]:
         with self._overlay_lock:
             path = self._overlay_path
             loop = self._overlay_loop
@@ -162,7 +160,8 @@ class AudioPlayer:
     ) -> bool:
         with self._overlay_lock:
             return (
-                generation == self._overlay_generation
+                generation
+                == self._overlay_generation
             )
 
     def _take_song_change(
@@ -174,27 +173,118 @@ class AudioPlayer:
 
         return change
 
-    def _apply_volume(
+    def _duration_frames(
         self,
-        pcm: array,
-    ) -> array:
-        if self._volume == 1.0:
-            return pcm
+        path: Path,
+    ) -> int:
+        """
+        Return the decoded output duration in frames.
 
-        return array(
-            pcm.typecode,
-            (
-                int(sample * self._volume)
-                for sample in pcm
+        The result is cached because station switching may return
+        to the same audio file many times.
+        """
+        cached = self._duration_cache.get(path)
+
+        if cached is not None:
+            return cached
+
+        info = miniaudio.get_file_info(
+            str(path),
+        )
+
+        duration_frames = max(
+            1,
+            round(
+                info.duration
+                * AUDIO_SAMPLE_RATE
             ),
         )
 
-    def _loop_stream(self) -> AudioStream:
-        """
-        Backward-compatible stream entry point.
+        self._duration_cache[path] = (
+            duration_frames
+        )
 
-        Some existing tests use _loop_stream() directly.
+        return duration_frames
+
+    def _fade_pcm(
+        self,
+        pcm: array,
+        *,
+        start_frame: int,
+        duration_frames: int,
+    ) -> array:
         """
+        Apply a linear fade-out to PCM near the end
+        of the current song.
+
+        The fade is applied before overlay mixing, so an
+        active switch overlay is not faded together with
+        the station audio.
+        """
+        fade_frames = (
+            FADE_OUT_DURATION_MS
+            * AUDIO_SAMPLE_RATE
+            // 1000
+        )
+
+        if fade_frames <= 0:
+            return pcm
+
+        fade_start = max(
+            0,
+            duration_frames - fade_frames,
+        )
+
+        fade_length = (
+            duration_frames - fade_start
+        )
+
+        if fade_length <= 0:
+            return pcm
+
+        result = array(
+            pcm.typecode,
+            pcm,
+        )
+
+        frame_count = (
+            len(result) // CHANNELS
+        )
+
+        for frame_offset in range(
+            frame_count
+        ):
+            frame = (
+                start_frame
+                + frame_offset
+            )
+
+            if frame < fade_start:
+                continue
+
+            if frame >= duration_frames:
+                continue
+
+            gain = (
+                duration_frames - frame
+            ) / fade_length
+
+            base = (
+                frame_offset * CHANNELS
+            )
+
+            for channel in range(
+                CHANNELS
+            ):
+                result[base + channel] = int(
+                    result[base + channel]
+                    * gain
+                )
+
+        return result
+
+    def _loop_stream(self) -> AudioStream:
+        """Backward-compatible stream entry point."""
         return self._audio_stream()
 
     def _audio_stream(self) -> AudioStream:
@@ -209,6 +299,18 @@ class AudioPlayer:
             self._start_position_ms
         )
 
+        main_duration_frames = (
+            self._duration_frames(current_path)
+        )
+
+        main_position_frames = (
+            current_start_position_ms
+            * AUDIO_SAMPLE_RATE
+            // 1000
+        )
+
+        main_position_frames %= main_duration_frames
+
         active_overlay_generation: int | None = None
         active_overlay_path: Path | None = None
         active_overlay_loop = False
@@ -218,14 +320,17 @@ class AudioPlayer:
 
             while True:
                 required_samples = (
-                    requested_frames * 2
+                    requested_frames
+                    * CHANNELS
                 )
 
                 # -------------------------------------------------
                 # SONG CHANGE
                 # -------------------------------------------------
 
-                song_change = self._take_song_change()
+                song_change = (
+                    self._take_song_change()
+                )
 
                 if song_change is not None:
                     (
@@ -239,24 +344,29 @@ class AudioPlayer:
                     decoder_stream = None
                     buffer = array("h")
 
-                    # A station change immediately invalidates
-                    # the old switch overlay.
-                    if overlay_stream is not None:
-                        overlay_stream.close()
+                    main_duration_frames = (
+                        self._duration_frames(
+                            current_path,
+                        )
+                    )
 
-                    overlay_stream = None
-                    overlay_buffer = array("h")
+                    main_position_frames = (
+                        current_start_position_ms
+                        * AUDIO_SAMPLE_RATE
+                        // 1000
+                    )
 
-                    active_overlay_generation = None
-                    active_overlay_path = None
-                    active_overlay_loop = False
+                    main_position_frames %= (
+                        main_duration_frames
+                    )
 
                 # -------------------------------------------------
                 # OVERLAY INVALIDATION
                 # -------------------------------------------------
 
                 if (
-                    active_overlay_generation is not None
+                    active_overlay_generation
+                    is not None
                     and not self._overlay_is_current(
                         active_overlay_generation,
                     )
@@ -277,39 +387,99 @@ class AudioPlayer:
 
                 while len(buffer) < required_samples:
                     if decoder_stream is None:
-                        start_frame = (
-                            current_start_position_ms
-                            * AUDIO_SAMPLE_RATE
-                            // 1000
-                        )
+                        if (
+                            main_position_frames
+                            >= main_duration_frames
+                        ):
+                            main_position_frames = 0
 
                         decoder = AudioDecoder(
                             current_path,
-                            start_frame=start_frame,
+                            start_frame=(
+                                main_position_frames
+                            ),
                         )
 
-                        decoder_stream = decoder.stream()
-
-                        # Seek is used only for the first decoder
-                        # after a song change.
-                        #
-                        # Every EOF restart begins from zero.
-                        current_start_position_ms = 0
+                        decoder_stream = (
+                            decoder.stream()
+                        )
 
                     try:
                         chunk = next(
-                            decoder_stream,
+                            decoder_stream
                         )
 
                     except StopIteration:
                         decoder_stream.close()
                         decoder_stream = None
 
-                        current_start_position_ms = 0
+                        main_position_frames = 0
 
                         continue
 
-                    buffer.extend(chunk)
+                    chunk_frames = (
+                        len(chunk)
+                        // CHANNELS
+                    )
+
+                    if chunk_frames <= 0:
+                        continue
+
+                    remaining_frames = (
+                        main_duration_frames
+                        - main_position_frames
+                    )
+
+                    if remaining_frames <= 0:
+                        decoder_stream.close()
+                        decoder_stream = None
+                        main_position_frames = 0
+                        continue
+
+                    take_frames = min(
+                        chunk_frames,
+                        remaining_frames,
+                    )
+
+                    chunk_samples = (
+                        take_frames
+                        * CHANNELS
+                    )
+
+                    chunk_pcm = array(
+                        "h",
+                        chunk[
+                            :chunk_samples
+                        ],
+                    )
+
+                    chunk_pcm = (
+                        self._fade_pcm(
+                            chunk_pcm,
+                            start_frame=(
+                                main_position_frames
+                            ),
+                            duration_frames=(
+                                main_duration_frames
+                            ),
+                        )
+                    )
+
+                    buffer.extend(
+                        chunk_pcm
+                    )
+
+                    main_position_frames += (
+                        take_frames
+                    )
+
+                    if (
+                        main_position_frames
+                        >= main_duration_frames
+                    ):
+                        decoder_stream.close()
+                        decoder_stream = None
+                        main_position_frames = 0
 
                 output = array(
                     "h",
@@ -319,7 +489,7 @@ class AudioPlayer:
                 del buffer[:required_samples]
 
                 # -------------------------------------------------
-                # NEW OVERLAY REQUEST
+                # NEW OVERLAY
                 # -------------------------------------------------
 
                 (
@@ -340,8 +510,12 @@ class AudioPlayer:
 
                     overlay_buffer = array("h")
 
-                    active_overlay_path = overlay_path
-                    active_overlay_loop = overlay_loop
+                    active_overlay_path = (
+                        overlay_path
+                    )
+                    active_overlay_loop = (
+                        overlay_loop
+                    )
                     active_overlay_generation = (
                         overlay_generation
                     )
@@ -352,7 +526,8 @@ class AudioPlayer:
 
                 if overlay_stream is not None:
                     if (
-                        active_overlay_generation is None
+                        active_overlay_generation
+                        is None
                         or not self._overlay_is_current(
                             active_overlay_generation,
                         )
@@ -366,22 +541,18 @@ class AudioPlayer:
                         active_overlay_loop = False
 
                     else:
-                        while len(
-                            overlay_buffer
-                        ) < required_samples:
-
+                        while (
+                            len(overlay_buffer)
+                            < required_samples
+                        ):
                             if not self._overlay_is_current(
                                 active_overlay_generation,
                             ):
                                 overlay_stream.close()
                                 overlay_stream = None
-                                overlay_buffer = array(
-                                    "h"
-                                )
+                                overlay_buffer = array("h")
 
-                                active_overlay_generation = (
-                                    None
-                                )
+                                active_overlay_generation = None
                                 active_overlay_path = None
                                 active_overlay_loop = False
 
@@ -393,10 +564,6 @@ class AudioPlayer:
                                 )
 
                             except StopIteration:
-                                # -------------------------------------------------
-                                # LOOPING OVERLAY
-                                # -------------------------------------------------
-
                                 if (
                                     active_overlay_loop
                                     and active_overlay_path
@@ -415,20 +582,14 @@ class AudioPlayer:
 
                                     continue
 
-                                # -------------------------------------------------
-                                # NON-LOOPING OVERLAY
-                                # -------------------------------------------------
-
                                 overlay_stream.close()
                                 overlay_stream = None
 
-                                # IMPORTANT:
+                                # Do not discard active_overlay_generation here.
                                 #
-                                # Do NOT clear overlay_buffer here.
-                                #
-                                # It may contain the final partial
-                                # chunk of the overlay and must still
-                                # be mixed into the current output.
+                                # overlay_buffer may still contain samples that were
+                                # decoded immediately before EOF. Those samples must
+                                # still be mixed into the current output.
                                 break
 
                             overlay_buffer.extend(
@@ -474,31 +635,25 @@ class AudioPlayer:
                             :overlay_samples
                         ]
 
-                        # Non-looping overlay reached EOF
-                        # and its remaining samples have now
-                        # been consumed.
-                        if (
-                            overlay_stream is None
-                            and not active_overlay_loop
-                            and not overlay_buffer
-                        ):
-                            active_overlay_generation = (
-                                None
-                            )
-                            active_overlay_path = None
-                            active_overlay_loop = False
-
                     else:
-                        overlay_buffer = array(
-                            "h"
-                        )
+                        overlay_buffer = array("h")
+
+                if (
+                    overlay_stream is None
+                    and not overlay_buffer
+                    and active_overlay_generation
+                    is not None
+                    and not active_overlay_loop
+                ):
+                    active_overlay_generation = None
+                    active_overlay_path = None
 
                 # -------------------------------------------------
                 # VOLUME
                 # -------------------------------------------------
 
                 output = self._apply_volume(
-                    output
+                    output,
                 )
 
                 requested_frames = yield output
@@ -509,3 +664,20 @@ class AudioPlayer:
 
             if overlay_stream is not None:
                 overlay_stream.close()
+
+    def _apply_volume(
+        self,
+        pcm: array,
+    ) -> array:
+        if self._volume == 1.0:
+            return pcm
+
+        return array(
+            pcm.typecode,
+            (
+                int(
+                    sample * self._volume
+                )
+                for sample in pcm
+            ),
+        )
