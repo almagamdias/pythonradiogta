@@ -4,6 +4,7 @@ import time
 import tkinter as tk
 
 from radio.engine import RadioEngine
+from radio.model.station_state import StationState
 
 from gui.carousel import StationCarousel
 
@@ -16,13 +17,19 @@ class RadioWindow:
 
     MOUSE_WHEEL_DEBOUNCE = 0.08
 
-    def __init__(self, engine: RadioEngine) -> None:
+    def __init__(
+        self,
+        engine: RadioEngine,
+    ) -> None:
         self._engine = engine
 
         self._root = tk.Tk()
         self._root.title("GTA Radio Simulator")
         self._root.geometry("1150x340")
-        self._root.resizable(False, False)
+        self._root.resizable(
+            False,
+            False,
+        )
 
         self._root.protocol(
             "WM_DELETE_WINDOW",
@@ -47,13 +54,60 @@ class RadioWindow:
 
         self._pending_poll_id: str | None = None
 
+        self._play_button = tk.Button(
+            self._root,
+            text="▶ PLAY",
+            width=12,
+            command=self._toggle_playback,
+        )
+
+        self._play_button.pack(
+            pady=(0, 5),
+        )
+
         self._bind_input()
+        self._update_play_button()
         self._poll_pending_station()
+
+    # ------------------------------------------------------------------
+    # Window
+    # ------------------------------------------------------------------
 
     def _on_close(self) -> None:
         """Stop radio playback and close the GUI."""
         self._engine.stop()
         self._root.destroy()
+
+    # ------------------------------------------------------------------
+    # Playback
+    # ------------------------------------------------------------------
+
+    def _toggle_playback(self) -> None:
+        """Start or stop radio playback."""
+        if self._engine.state is StationState.OFF:
+            self._engine.play()
+        else:
+            self._engine.stop()
+            self._carousel.set_transparent()
+            self._carousel.refresh()
+
+        self._update_play_button()
+
+    def _update_play_button(self) -> None:
+        """Update the play/stop button text."""
+        if self._engine.state is StationState.OFF:
+            self._play_button.configure(
+                text="▶ PLAY",
+            )
+            return
+
+        self._play_button.configure(
+            text="■ STOP",
+        )
+
+    # ------------------------------------------------------------------
+    # Engine state polling
+    # ------------------------------------------------------------------
 
     def _poll_pending_station(self) -> None:
         """Watch radio state for carousel visibility."""
@@ -90,10 +144,16 @@ class RadioWindow:
         ):
             self._carousel.schedule_fade_out()
 
+        self._update_play_button()
+
         self._pending_poll_id = self._root.after(
             50,
             self._poll_pending_station,
         )
+
+    # ------------------------------------------------------------------
+    # Input
+    # ------------------------------------------------------------------
 
     def _bind_input(self) -> None:
         self._root.bind(
@@ -117,6 +177,21 @@ class RadioWindow:
             self._wheel_down,
         )
 
+        # Space toggles radio playback.
+        self._root.bind(
+            "<space>",
+            self._toggle_playback_event,
+        )
+
+    def _toggle_playback_event(
+        self,
+        event: tk.Event | None = None,
+    ) -> str:
+        """Toggle playback from the keyboard."""
+        self._toggle_playback()
+
+        return "break"
+
     def _previous_station(
         self,
         event: tk.Event | None = None,
@@ -125,6 +200,9 @@ class RadioWindow:
             return
 
         self._backend_input_locked = True
+
+        if self._engine.state is StationState.OFF:
+            self._engine.play()
 
         self._engine.previous_station()
         self._carousel.animate_previous()
@@ -143,6 +221,9 @@ class RadioWindow:
 
         self._backend_input_locked = True
 
+        if self._engine.state is StationState.OFF:
+            self._engine.play()
+
         self._engine.next_station()
         self._carousel.animate_next()
 
@@ -153,6 +234,10 @@ class RadioWindow:
 
     def _unlock_backend_input(self) -> None:
         self._backend_input_locked = False
+
+    # ------------------------------------------------------------------
+    # Mouse wheel
+    # ------------------------------------------------------------------
 
     def _wheel_allowed(self) -> bool:
         now = time.monotonic()
@@ -184,6 +269,10 @@ class RadioWindow:
             return
 
         self._previous_station()
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
 
     def run(self) -> None:
         """Start the GUI event loop."""

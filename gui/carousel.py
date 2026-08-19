@@ -141,6 +141,9 @@ class StationCarousel:
         # Build everything while invisible.
         self.refresh()
 
+    def set_transparent(self) -> None:
+        self._alpha = 0
+
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------

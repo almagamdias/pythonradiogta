@@ -20,7 +20,8 @@ class RadioEngine:
         self._volume = 1.0
 
         self._library = library
-        self._station_index = 0
+
+        self._station_index = random.randint(0, self._library.__len__())
 
         self._player: AudioPlayer | None = None
 
@@ -103,7 +104,8 @@ class RadioEngine:
         if self._player is not None:
             return
 
-        self._initialize_station_timelines()
+        if self._radio_started_at is None:
+            self._initialize_station_timelines()
 
         start_position = self._station_position(
             self._station_index
@@ -132,9 +134,6 @@ class RadioEngine:
 
         self._pending_station_index = None
         self._switch_overlay_active = False
-
-        self._radio_started_at = None
-        self._station_start_positions.clear()
 
         self._state = StationState.OFF
 
@@ -272,6 +271,14 @@ class RadioEngine:
         # Repeated next/previous presses while the timer is running
         # only replace the pending destination. They do not create
         # additional switch noises.
+
+        if self._player is not None:
+            self._player.prepare_song(
+                self._library[
+                    station_index
+                ].songs[0].path
+            )
+        
         if (
             self._player is not None
             and not self._switch_overlay_active
